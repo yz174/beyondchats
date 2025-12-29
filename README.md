@@ -2,7 +2,7 @@
 
 A comprehensive full-stack application for scraping, optimizing, and managing articles using AI-powered content enhancement.
 
-## 🚀 Features
+## Features
 
 ### Phase 1: Web Scraping & CRUD APIs
 - Scrapes articles from BeyondChats blog (last page, 5 oldest articles)
@@ -24,14 +24,14 @@ A comprehensive full-stack application for scraping, optimizing, and managing ar
 - Side-by-side comparison of original and optimized content
 - Reference source display
 
-## 📋 Prerequisites
+## Prerequisites
 
 - Node.js (v18 or higher)
 - MongoDB (local or Atlas)
 - Google Custom Search API credentials (optional, has Puppeteer fallback)
 - Google Gemini API key (free tier available)
 
-## 🛠️ Installation
+## Installation
 
 ### 1. Clone the Repository
 
@@ -86,7 +86,7 @@ Edit `frontend/.env`:
 VITE_API_BASE_URL=http://localhost:5000/api
 ```
 
-## 🚀 Usage
+## Usage
 
 ### Step 1: Start MongoDB
 
@@ -151,92 +151,7 @@ npm run dev
 
 Frontend will start on http://localhost:5173
 
-## 📡 API Documentation
-
-### Base URL
-```
-http://localhost:5000/api
-```
-
-### Endpoints
-
-#### Get All Articles
-```http
-GET /articles?page=1&limit=10&isUpdated=true
-```
-
-**Query Parameters:**
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Items per page (default: 50)
-- `isUpdated` (optional): Filter by updated status ("true" or "false")
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": [...],
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "total": 5,
-    "pages": 1
-  }
-}
-```
-
-#### Get Single Article
-```http
-GET /articles/:id
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "_id": "...",
-    "title": "Article Title",
-    "content": "...",
-    "url": "...",
-    "isUpdated": false,
-    "references": [],
-    "createdAt": "2025-12-29T...",
-    "updatedAt": "2025-12-29T..."
-  }
-}
-```
-
-#### Create Article
-```http
-POST /articles
-Content-Type: application/json
-
-{
-  "title": "Article Title",
-  "content": "Article content...",
-  "url": "https://example.com/article",
-  "source": "BeyondChats"
-}
-```
-
-#### Update Article
-```http
-PUT /articles/:id
-Content-Type: application/json
-
-{
-  "content": "Updated content...",
-  "isUpdated": true,
-  "references": [...]
-}
-```
-
-#### Delete Article
-```http
-DELETE /articles/:id
-```
-
-## 🏗️ Project Structure
+##  Project Structure
 
 ```
 beyondchats/
@@ -276,7 +191,7 @@ beyondchats/
     └── package.json
 ```
 
-## 🔧 Technologies Used
+##  Technologies Used
 
 ### Backend
 - **Node.js** - Runtime environment
@@ -294,85 +209,8 @@ beyondchats/
 - **TailwindCSS** - Styling
 - **Axios** - API requests
 
-## 🎨 Features Breakdown
 
-### Frontend Features
-
-1. **Article List View**
-   - Grid layout with responsive design
-   - Filter by status (All/Original/Optimized)
-   - Pagination support
-   - Article previews with metadata
-   - Status badges
-
-2. **Article Detail View**
-   - Three viewing modes:
-     - Current/Optimized version
-     - Original version
-     - Side-by-side comparison
-   - Markdown rendering
-   - Reference citations with links
-   - Metadata display (date, author, source)
-
-3. **UI/UX**
-   - Professional, modern design
-   - Fully responsive (mobile, tablet, desktop)
-   - Loading states
-   - Error handling
-   - Smooth transitions
-
-### Backend Features
-
-1. **Scraping Engine**
-   - Robust selector fallbacks
-   - Error handling
-   - Rate limiting
-   - Full content extraction
-   - Duplicate detection
-
-2. **Optimization Engine**
-   - Google Search integration (API + fallback)
-   - Multi-source content analysis
-   - Gemini AI-powered rewriting
-   - Citation management
-   - Version control
-
-3. **API Server**
-   - RESTful design
-   - CORS support
-   - Error handling
-   - Pagination
-   - Filtering
-
-## 🔑 Getting API Keys
-
-### Google Gemini API Key (Required for Phase 2) - FREE!
-
-1. **Go to Google AI Studio:** https://makersuite.google.com/app/apikey
-2. **Sign in** with your Google account
-3. **Click "Create API Key"**
-4. **Select or create a project**
-5. **Copy the API key** and add to `backend/.env`:
-   ```env
-   GEMINI_API_KEY=your_actual_key_here
-   ```
-
-**Gemini Free Tier:**
-- ✅ 60 requests per minute
-- ✅ Completely FREE
-- ✅ No credit card required
-- ✅ Perfect for this project!
-
-### Google Custom Search API (Optional)
-1. Go to https://developers.google.com/custom-search/v1/introduction
-2. Get an API key
-3. Create a Custom Search Engine at https://cse.google.com/
-4. Get the Search Engine ID
-5. Add to .env file
-
-**Note:** If you don't provide Google API credentials, the system will automatically use Puppeteer to scrape Google search results.
-
-## 📝 Scripts
+##  Scripts
 
 ### Backend Scripts
 
@@ -402,88 +240,3 @@ npm run build
 # Preview production build
 npm run preview
 ```
-
-## 🐛 Troubleshooting
-
-### Backend Issues
-
-**MongoDB Connection Error**
-```bash
-# Check if MongoDB is running
-mongosh
-
-# Or use MongoDB Atlas connection string
-```
-
-**Puppeteer Installation Issues**
-```bash
-# Windows: Install Chrome/Chromium manually
-# Set PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true before npm install
-```
-
-**Scraping Fails**
-- Check internet connection
-- Website structure may have changed (update selectors)
-- Add delays between requests
-- Check for CAPTCHA or bot detection
-
-### Frontend Issues
-
-**API Connection Error**
-- Ensure backend server is running on port 5000
-- Check VITE_API_BASE_URL in .env
-- Verify CORS settings in backend
-
-**Build Errors**
-```bash
-# Clear node_modules and reinstall
-rm -rf node_modules package-lock.json
-npm install
-```
-
-## 🚀 Deployment
-
-### Backend Deployment (Example: Heroku)
-
-```bash
-# Add Procfile
-echo "web: node src/server.js" > Procfile
-
-# Deploy
-heroku create beyondchats-api
-heroku addons:create mongolab
-git push heroku main
-```
-
-### Frontend Deployment (Example: Vercel)
-
-```bash
-# Build
-npm run build
-
-# Deploy to Vercel
-vercel --prod
-```
-
-## 📄 License
-
-MIT License
-
-## 👥 Author
-
-Your Name
-
-## 🙏 Acknowledgments
-
-- BeyondChats for the source articles
-- OpenAI for GPT-4 API
-- Google Custom Search API
-- All open-source libraries used
-
-## 📧 Support
-
-For issues or questions, please create an issue in the repository.
-
----
-
-**Happy Coding! 🎉**
