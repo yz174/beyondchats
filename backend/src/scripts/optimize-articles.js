@@ -98,10 +98,14 @@ async function scrapeGoogleWithPuppeteer(query) {
     });
     
     // Wait for results to load
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
 
-    // Take screenshot for debugging (optional)
-    // await page.screenshot({ path: 'google-search.png' });
+    // Check if Google is showing CAPTCHA or blocking
+    const pageText = await page.evaluate(() => document.body.innerText);
+    if (pageText.includes('unusual traffic') || pageText.includes('CAPTCHA')) {
+      console.log('   ⚠️ Google is blocking automated access (CAPTCHA detected)');
+      return [];
+    }
 
     const results = await page.evaluate(() => {
       const items = [];
@@ -164,6 +168,40 @@ async function scrapeGoogleWithPuppeteer(query) {
     });
 
     console.log(`   Found ${results.length} valid results`);
+    
+    // If no results found, try alternative search approach
+    if (results.length === 0) {
+      console.log('   Trying alternative search method...');
+      
+      // Get all links from the page
+      const allLinks = await page.evaluate(() => {
+        const links = [];
+        const anchors = document.querySelectorAll('a[href]');
+        anchors.forEach(a => {
+          const href = a.href;
+          const text = a.textContent.trim();
+          if (href && text && href.startsWith('http') && !href.includes('google.com')) {
+            links.push({ url: href, title: text });
+          }
+        });
+        return links;
+      });
+      
+      // Filter for likely blog/article links
+      const blogLinks = allLinks.filter(link => {
+        const url = link.url.toLowerCase();
+        const excludeDomains = ['youtube.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'beyondchats.com'];
+        return !excludeDomains.some(domain => url.includes(domain)) && link.title.length > 10;
+      });
+      
+      console.log(`   Found ${blogLinks.length} alternative links`);
+      return blogLinks.slice(0, 2).map(link => ({
+        title: link.title,
+        url: link.url,
+        snippet: ''
+      }));
+    }
+    
     return results.slice(0, 2);
     
   } catch (error) {
@@ -267,7 +305,7 @@ INSTRUCTIONS:
 OPTIMIZED ARTICLE:`;
 
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [{
           parts: [{
