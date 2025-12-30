@@ -241,11 +241,8 @@ router.post('/:id/optimize', async (req, res) => {
     }
 
     // Import optimization functions
-    const { default: puppeteer } = await import('puppeteer-extra');
-    const { default: StealthPlugin } = await import('puppeteer-extra-plugin-stealth');
+    const { default: puppeteer } = await import('puppeteer');
     const axios = (await import('axios')).default;
-    
-    puppeteer.use(StealthPlugin());
 
     // Send initial response
     res.json({
@@ -548,68 +545,20 @@ async function searchGoogleForArticle(query, puppeteer) {
 
 // Helper function to scrape article content
 async function scrapeArticleContent(url, puppeteer) {
-  // Detect Chrome executable path and configure for environment
-  let executablePath;
-  let launchArgs = [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--single-process',
-    '--no-zygote'
-  ];
-  
-  // Check if we're on Railway/Linux (production)
-  if (process.platform === 'linux') {
-    try {
-      // Use @sparticuz/chromium for serverless/cloud environments
-      const chromium = await import('@sparticuz/chromium');
-      executablePath = await chromium.default.executablePath();
-      launchArgs = chromium.default.args;
-    } catch (chromiumError) {
-      console.log('Could not load @sparticuz/chromium, trying system Chrome');
-      // Fallback: try to find system Chrome
-      const possiblePaths = [
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-      ];
-      
-      const fs = await import('fs');
-      for (const path of possiblePaths) {
-        if (fs.existsSync(path)) {
-          executablePath = path;
-          break;
-        }
-      }
-    }
-  } else {
-    // Local development - find Chrome
-    const possiblePaths = [
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    ];
-    
-    const fs = await import('fs');
-    for (const path of possiblePaths) {
-      if (fs.existsSync(path)) {
-        executablePath = path;
-        break;
-      }
-    }
-  }
-
   let browser;
   try {
-    // Import puppeteer-core for direct execution
-    const puppeteerCore = await import('puppeteer-core');
-    
-    browser = await puppeteerCore.default.launch({
+    // Use puppeteer's bundled Chrome
+    browser = await puppeteer.launch({
       headless: 'new',
-      executablePath,
-      args: launchArgs,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-blink-features=AutomationControlled',
+        '--no-first-run',
+        '--single-process'
+      ],
     });
 
     const page = await browser.newPage();

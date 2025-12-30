@@ -29,10 +29,7 @@ async function scrapeBeyondChatsArticles() {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-blink-features=AutomationControlled',
-        '--no-first-run',
-        '--single-process'
+        '--disable-gpu'
       ],
     });
     console.log('✅ Browser launched successfully');
@@ -41,19 +38,25 @@ async function scrapeBeyondChatsArticles() {
     throw launchError;
   }
 
+  let page;
   try {
     console.log('🔄 Creating new page...');
-    const page = await browser.newPage();
+    page = await browser.newPage();
     
     // Set viewport and user agent
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    // Set longer default timeout
+    page.setDefaultNavigationTimeout(60000);
+    page.setDefaultTimeout(60000);
+    
     console.log('✅ Page configuration complete');
     
     console.log('🌐 Navigating to BeyondChats blogs page...');
     
     await page.goto('https://beyondchats.com/blogs/', {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle2',
       timeout: 60000,
     });
     console.log('✅ Navigation successful');
