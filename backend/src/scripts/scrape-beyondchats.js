@@ -17,9 +17,15 @@ async function scrapeBeyondChatsArticles() {
     console.log('Using existing database connection');
   }
   
+  // Use default Puppeteer Chrome for local development
   const browser = await puppeteer.launch({
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu'
+    ],
   });
 
   try {
@@ -29,14 +35,29 @@ async function scrapeBeyondChatsArticles() {
     await page.setViewport({ width: 1920, height: 1080 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
-    console.log('Navigating to BeyondChats blogs page...');
-    await page.goto('https://beyondchats.com/blogs/', {
-      waitUntil: 'networkidle2',
-      timeout: 60000,
+    // Wait for page to be ready
+    await page.evaluateOnNewDocument(() => {
+      // This runs before any page script
     });
+    
+    console.log('Navigating to BeyondChats blogs page...');
+    try {
+      await page.goto('https://beyondchats.com/blogs/', {
+        waitUntil: 'networkidle0',
+        timeout: 30000,
+      });
+    } catch (navigationError) {
+      console.log('First navigation attempt failed, retrying...');
+      // Wait a bit before retrying
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await page.goto('https://beyondchats.com/blogs/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 20000,
+      });
+    }
 
     // Wait for content to load
-    await page.waitForSelector('body', { timeout: 10000 });
+    await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Find pagination to get to the last page
     console.log('Looking for pagination...');
@@ -86,16 +107,21 @@ async function scrapeBeyondChatsArticles() {
       console.log(`Navigating to page ${lastPageNumber}...`);
       try {
         await page.goto(`https://beyondchats.com/blogs/?page=${lastPageNumber}`, {
-          waitUntil: 'networkidle2',
-          timeout: 60000,
+          waitUntil: 'domcontentloaded',
+          timeout: 20000,
         });
       } catch (error) {
         console.log('Error navigating to last page, trying alternative URL format...');
-        await page.goto(`https://beyondchats.com/blogs/page/${lastPageNumber}/`, {
-          waitUntil: 'networkidle2',
-          timeout: 60000,
-        });
+        try {
+          await page.goto(`https://beyondchats.com/blogs/page/${lastPageNumber}/`, {
+            waitUntil: 'domcontentloaded',
+            timeout: 20000,
+          });
+        } catch (secondError) {
+          console.log('Both pagination attempts failed, continuing with first page...');
+        }
       }
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
     // Scrape articles from the current page
@@ -222,13 +248,23 @@ async function scrapeBeyondChatsArticles() {
         }
 
         // Navigate to article page
-        await page.goto(article.url, {
-          waitUntil: 'domcontentloaded',
-          timeout: 60000,
-        });
+        try {
+          await page.goto(article.url, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000,
+          });
+        } catch (navigationError) {
+          console.log(`Navigation failed for ${article.url}, skipping...`);
+          continue;
+        }
 
         // Wait for content to load - try multiple strategies
-        await page.waitForSelector('h1', { timeout: 10000 });
+        try {
+          await page.waitForSelector('h1', { timeout: 10000 });
+        } catch (selectorError) {
+          console.log(`Article content not found for ${article.url}, skipping...`);
+          continue;
+        }
         
         // Wait a bit for dynamic content to render
         await new Promise(resolve => setTimeout(resolve, 3000));

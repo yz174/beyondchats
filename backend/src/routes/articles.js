@@ -137,6 +137,26 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// DELETE all articles (must come before /:id route)
+router.delete('/all', async (req, res) => {
+  try {
+    const result = await Article.deleteMany({});
+    
+    res.json({
+      success: true,
+      message: `Successfully deleted ${result.deletedCount} articles`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error('Error deleting articles:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting articles',
+      error: error.message,
+    });
+  }
+});
+
 // DELETE article by ID
 router.delete('/:id', async (req, res) => {
   try {
