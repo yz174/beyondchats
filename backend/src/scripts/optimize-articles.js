@@ -1,8 +1,12 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import connectDB from '../config/database.js';
 import Article from '../models/Article.js';
+
+// Enable stealth plugin to avoid detection
+puppeteer.use(StealthPlugin());
 
 dotenv.config();
 
@@ -11,201 +15,103 @@ const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const GOOGLE_SEARCH_ENGINE_ID = process.env.GOOGLE_SEARCH_ENGINE_ID;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Function to search Google using Custom Search API
+// Function to search Google using Stealth Puppeteer
 async function searchGoogle(query) {
-  try {
-    const response = await axios.get('https://www.googleapis.com/customsearch/v1', {
-      params: {
-        key: GOOGLE_API_KEY,
-        cx: GOOGLE_SEARCH_ENGINE_ID,
-        q: query,
-        num: 10, // Get 10 results to filter
-      },
-    });
-
-    // Filter for blog/article URLs
-    const blogUrls = response.data.items
-      .filter(item => {
-        const url = item.link.toLowerCase();
-        const title = item.title.toLowerCase();
-        // Filter for blog-like URLs and exclude certain domains
-        return (
-          (url.includes('blog') || 
-           url.includes('article') || 
-           url.includes('post') ||
-           title.includes('blog') ||
-           title.includes('article')) &&
-          !url.includes('beyondchats.com') &&
-          !url.includes('youtube.com') &&
-          !url.includes('facebook.com') &&
-          !url.includes('twitter.com') &&
-          !url.includes('linkedin.com')
-        );
-      })
-      .slice(0, 2)
-      .map(item => ({
-        title: item.title,
-        url: item.link,
-        snippet: item.snippet,
-      }));
-
-    return blogUrls;
-  } catch (error) {
-    console.error('Error searching Google:', error.message);
-    
-    // Fallback: Use Puppeteer to scrape Google search results
-    console.log('Falling back to Puppeteer scraping...');
-    return await scrapeGoogleWithPuppeteer(query);
-  }
+  console.log('   Using Stealth Puppeteer to search Google...');
+  return await scrapeGoogleWithPuppeteer(query);
 }
 
-// Fallback function to scrape Google using Puppeteer
+// Function to scrape Google using Stealth Puppeteer
 async function scrapeGoogleWithPuppeteer(query) {
+  // Launch visible browser (Headless: false)
   const browser = await puppeteer.launch({
-    headless: 'new',
+    headless: false,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process'
+      '--disable-infobars',
+      '--window-position=0,0',
+      '--ignore-certificate-errors',
     ],
+    defaultViewport: null,
   });
 
   try {
     const page = await browser.newPage();
     
-    // Stealth mode - make it look like a real browser
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    });
-    
-    // Override webdriver property
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-      });
-    });
-    
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query + ' blog article')}`;
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query + ' blog')}&hl=en`;
     console.log(`   Navigating to: ${searchUrl}`);
     
-    await page.goto(searchUrl, { 
-      waitUntil: 'domcontentloaded',
-      timeout: 30000 
-    });
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     
-    // Wait for results to load
-    await page.waitForTimeout(3000);
+    // --- UPDATED CAPTCHA DETECTION ---
+    // Check specifically for the text found in your logs
+    const bodyText = await page.evaluate(() => document.body.innerText.toLowerCase());
+    const isBlocked = bodyText.includes('unusual traffic') || 
+                      bodyText.includes('captcha') || 
+                      bodyText.includes('robot');
 
-    // Check if Google is showing CAPTCHA or blocking
-    const pageText = await page.evaluate(() => document.body.innerText);
-    if (pageText.includes('unusual traffic') || pageText.includes('CAPTCHA')) {
-      console.log('   ⚠️ Google is blocking automated access (CAPTCHA detected)');
-      return [];
+    if (isBlocked) {
+      console.log('\n   🔴 GOOGLE BLOCK DETECTED!');
+      console.log('   👉 ACTION REQUIRED: Switch to the pop-up browser window.');
+      console.log('   👉 Please solve the CAPTCHA manually.');
+      console.log('   ⏳ Waiting for search results to appear...');
+
+      // This line pauses the script FOREVER until you solve the captcha
+      // and the search results (div with class 'g') appear on the screen.
+      await page.waitForSelector('.g, .MjjYud', { timeout: 0 });
+      
+      console.log('   ✅ CAPTCHA solved! Resuming script...');
+      await new Promise(r => setTimeout(r, 3000)); // Extra wait for results to render
     }
+    // --------------------------------
 
-    const results = await page.evaluate(() => {
-      const items = [];
-      
-      // Try multiple selectors for Google search results
-      const selectors = [
-        'div.g',           // Standard desktop
-        'div[data-sokoban-container]', // New layout
-        '.tF2Cxc',         // Alternative
-        'div[jsname]'      // Fallback
-      ];
-      
-      let searchResults = [];
-      for (const selector of selectors) {
-        searchResults = document.querySelectorAll(selector);
-        if (searchResults.length > 0) {
-          console.log(`Found ${searchResults.length} results with selector: ${selector}`);
-          break;
+    // Cookie Consent Handling (Just in case)
+    try {
+      const buttons = await page.$$('button');
+      for (const btn of buttons) {
+        const text = await page.evaluate(el => el.innerText.toLowerCase(), btn);
+        if (text.includes('accept all') || text.includes('i agree')) {
+          await btn.click();
+          await new Promise(r => setTimeout(r, 1000));
         }
       }
-      
-      searchResults.forEach((result) => {
-        try {
-          // Try to find title and link
-          const titleEl = result.querySelector('h3') || result.querySelector('[role="heading"]');
-          const linkEl = result.querySelector('a[href]');
+    } catch (e) {}
+
+    // Scrape Results
+    const results = await page.evaluate(() => {
+      const items = [];
+      const validSelectors = ['.g', '.MjjYud', '[data-header-feature]'];
+      const elements = document.querySelectorAll(validSelectors.join(','));
+
+      elements.forEach(element => {
+        const titleEl = element.querySelector('h3');
+        const linkEl = element.querySelector('a[href^="http"]');
+        const snippetEl = element.querySelector('.VwiC3b, .IsZvec, .lyLwlc');
+
+        if (titleEl && linkEl) {
+          const title = titleEl.innerText;
+          const url = linkEl.href;
           
-          if (titleEl && linkEl && linkEl.href) {
-            const url = linkEl.href;
-            const title = titleEl.textContent.trim();
-            
-            // Filter out unwanted results
-            const excludeDomains = [
-              'beyondchats.com',
-              'google.com',
-              'youtube.com',
-              'facebook.com',
-              'twitter.com',
-              'linkedin.com',
-              'instagram.com',
-              'pinterest.com'
-            ];
-            
-            const isExcluded = excludeDomains.some(domain => url.includes(domain));
-            
-            if (!isExcluded && url.startsWith('http')) {
-              items.push({
-                title: title,
-                url: url,
-                snippet: '',
-              });
-            }
+          const banned = ['beyondchats.com', 'google.com', 'youtube.com', 'facebook.com', 'linkedin.com', 'twitter.com', 'instagram.com', 'reddit.com'];
+
+          if (!banned.some(domain => url.includes(domain)) && title.length > 10) {
+             items.push({
+               title,
+               url,
+               snippet: snippetEl ? snippetEl.innerText : ''
+             });
           }
-        } catch (e) {
-          // Skip this result
         }
       });
-      
       return items;
     });
 
-    console.log(`   Found ${results.length} valid results`);
-    
-    // If no results found, try alternative search approach
-    if (results.length === 0) {
-      console.log('   Trying alternative search method...');
-      
-      // Get all links from the page
-      const allLinks = await page.evaluate(() => {
-        const links = [];
-        const anchors = document.querySelectorAll('a[href]');
-        anchors.forEach(a => {
-          const href = a.href;
-          const text = a.textContent.trim();
-          if (href && text && href.startsWith('http') && !href.includes('google.com')) {
-            links.push({ url: href, title: text });
-          }
-        });
-        return links;
-      });
-      
-      // Filter for likely blog/article links
-      const blogLinks = allLinks.filter(link => {
-        const url = link.url.toLowerCase();
-        const excludeDomains = ['youtube.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'beyondchats.com'];
-        return !excludeDomains.some(domain => url.includes(domain)) && link.title.length > 10;
-      });
-      
-      console.log(`   Found ${blogLinks.length} alternative links`);
-      return blogLinks.slice(0, 2).map(link => ({
-        title: link.title,
-        url: link.url,
-        snippet: ''
-      }));
-    }
-    
+    console.log(`   Found ${results.length} valid Google results`);
     return results.slice(0, 2);
-    
+
   } catch (error) {
-    console.error(`   Error during Puppeteer search: ${error.message}`);
+    console.error(`   Error scraping Google: ${error.message}`);
     return [];
   } finally {
     await browser.close();
@@ -216,17 +122,24 @@ async function scrapeGoogleWithPuppeteer(query) {
 async function scrapeArticleContent(url) {
   const browser = await puppeteer.launch({
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-infobars',
+    ],
   });
 
   try {
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1366, height: 768 });
     
     await page.goto(url, {
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
+    
+    // Random delay to mimic human behavior
+    await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
 
     const content = await page.evaluate(() => {
       // Remove unwanted elements
@@ -345,10 +258,7 @@ async function optimizeArticles() {
     process.exit(1);
   }
 
-  if (!GOOGLE_API_KEY && !GOOGLE_SEARCH_ENGINE_ID) {
-    console.warn('Warning: Google Custom Search API credentials not set.');
-    console.warn('Will use Puppeteer fallback for Google searches (works fine!).\n');
-  }
+  console.log('Using Stealth Puppeteer for Google searches (bypasses CAPTCHA)\n');
 
   // Connect to database
   await connectDB();
