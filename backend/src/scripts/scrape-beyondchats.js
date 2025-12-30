@@ -217,49 +217,111 @@ async function scrapeBeyondChatsArticles() {
 
         // Navigate to article page
         await page.goto(article.url, {
-          waitUntil: 'networkidle2',
+          waitUntil: 'domcontentloaded',
           timeout: 60000,
         });
 
+        // Wait for content to load - try multiple strategies
+        await page.waitForSelector('h1', { timeout: 10000 });
+        
+        // Wait a bit for dynamic content to render
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Scroll down to trigger lazy loading of content
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Debug: Log page HTML length to verify content is loaded
+        const htmlLength = await page.evaluate(() => document.body.innerHTML.length);
+        console.log(`Page HTML length: ${htmlLength} characters`);
+        
         // Scrape full article content
+// Scrape full article content
         const fullContent = await page.evaluate(() => {
-          // Try to find main article content
+          // 1. CLEANUP: Remove parts we don't want BEFORE we start scraping
+          const junkSelectors = [
+            '#comments', 
+            '.comments-area', 
+            '#respond', 
+            '.elementor-location-footer',
+            '.elementor-location-header',
+            '.related-posts',
+            '.sharedaddy'
+          ];
+          junkSelectors.forEach(sel => {
+            document.querySelectorAll(sel).forEach(el => el.remove());
+          });
+
+          // 2. METADATA EXTRACTION
+          const title = document.querySelector('h1')?.textContent.trim() || '';
+          
+          const authorElement = document.querySelector('.author-name, .elementor-icon-list-text, [rel="author"]');
+          const author = authorElement?.textContent.trim() || '';
+          
+          const dateElement = document.querySelector('time, .elementor-post-info__item--type-date');
+          const date = dateElement?.textContent.trim() || '';
+
+          // 3. CONTENT EXTRACTION
           const contentSelectors = [
-            'article',
-            '.article-content',
-            '.post-content',
-            '.entry-content',
-            'main',
-            '[class*="content"]',
-            '[class*="article"]',
+            '.elementor-widget-theme-post-content', 
+            '.entry-content',                       
+            '.post-content',                        
+            'main article',                         
+            'article'                               
           ];
 
           let contentElement = null;
-          for (const selector of contentSelectors) {
-            contentElement = document.querySelector(selector);
-            if (contentElement) break;
+          for (const sel of contentSelectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              contentElement = el;
+              break;
+            }
           }
+          
+          if (!contentElement) contentElement = document.body;
 
-          if (!contentElement) {
-            contentElement = document.body;
-          }
+          // 4. TEXT PROCESSING
+          const contentParts = [];
+          const allElements = contentElement.querySelectorAll('p, h2, h3, h4, ul, ol, blockquote');
+          
+          allElements.forEach(element => {
+            const text = element.textContent.trim();
+            
+            if (text.length < 5) return;
+            
+            const skipPatterns = [
+              /^share this/i,
+              /^published in/i,
+              /^tagged with/i
+            ];
+            if (skipPatterns.some(p => p.test(text))) return;
 
-          // Extract text content, preserving paragraphs
-          const paragraphs = Array.from(contentElement.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li'));
-          const text = paragraphs.map(p => p.textContent.trim()).filter(t => t.length > 20).join('\n\n');
-
-          // Also try to get metadata
-          let title = document.querySelector('h1')?.textContent.trim() || '';
-          let author = document.querySelector('[class*="author"], .author, [rel="author"]')?.textContent.trim() || '';
-          let date = document.querySelector('time, [datetime], .date')?.textContent.trim() || '';
+            if (element.tagName === 'UL' || element.tagName === 'OL') {
+               const items = Array.from(element.querySelectorAll('li'))
+                                  .map(li => `• ${li.textContent.trim()}`)
+                                  .join('\n');
+               if(items) contentParts.push(items);
+            } else {
+               contentParts.push(text);
+            }
+          });
 
           return {
-            content: text || 'Unable to extract content',
+            content: contentParts.join('\n\n') || 'Unable to extract content',
             title,
             author,
             date,
           };
         });
+        // Log what we extracted
+        console.log(`Title: ${fullContent.title || article.title}`);
+        console.log(`Author: ${fullContent.author || article.author || 'Unknown'}`);
+        console.log(`Date: ${fullContent.date || article.publishedDate || 'Unknown'}`);
+        console.log(`Content length: ${fullContent.content.length} characters`);
+        console.log(`Content preview: ${fullContent.content.substring(0, 200)}...`);
 
         // Create article in database
         const newArticle = new Article({
