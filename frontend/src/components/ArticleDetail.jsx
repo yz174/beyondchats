@@ -9,6 +9,8 @@ function ArticleDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [viewMode, setViewMode] = useState('current'); // 'current', 'original', 'comparison'
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizeMessage, setOptimizeMessage] = useState('');
 
   useEffect(() => {
     fetchArticle();
@@ -28,6 +30,62 @@ function ArticleDetail() {
       console.error('Error fetching article:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOptimize = async () => {
+    if (isOptimizing || article.isUpdated) return;
+
+    const confirmed = window.confirm(
+      'This will optimize the article using AI based on top Google results. This process may take a few minutes. Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setIsOptimizing(true);
+    setOptimizeMessage('Starting optimization... This may take 2-3 minutes.');
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/articles/${id}/optimize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setOptimizeMessage('Optimization in progress! Please wait...');
+        
+        // Poll for updates every 10 seconds
+        const pollInterval = setInterval(async () => {
+          const updatedArticle = await articlesAPI.getById(id);
+          if (updatedArticle.data.data.isUpdated) {
+            clearInterval(pollInterval);
+            setArticle(updatedArticle.data.data);
+            setOptimizeMessage('Optimization completed successfully!');
+            setIsOptimizing(false);
+            setTimeout(() => setOptimizeMessage(''), 3000);
+          }
+        }, 10000);
+
+        // Stop polling after 5 minutes
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          if (isOptimizing) {
+            setOptimizeMessage('Optimization is taking longer than expected. Please refresh the page in a few minutes.');
+            setIsOptimizing(false);
+          }
+        }, 300000);
+      } else {
+        setOptimizeMessage(data.message || 'Optimization failed');
+        setIsOptimizing(false);
+      }
+    } catch (error) {
+      console.error('Optimize error:', error);
+      setOptimizeMessage('Error: ' + error.message);
+      setIsOptimizing(false);
     }
   };
 
@@ -143,7 +201,7 @@ function ArticleDetail() {
       {/* Article Header */}
       <div className="bg-white rounded-lg shadow-lg p-8 mb-6">
         <div className="flex items-center justify-between mb-4">
-          <div>
+          <div className="flex items-center space-x-4">
             {article.isUpdated ? (
               <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
                 <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
@@ -152,9 +210,37 @@ function ArticleDetail() {
                 AI-Optimized
               </span>
             ) : (
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                Original Article
-              </span>
+              <>
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                  Original Article
+                </span>
+                <button
+                  onClick={handleOptimize}
+                  disabled={isOptimizing}
+                  className={`inline-flex items-center px-4 py-2 rounded-lg font-medium transition-all ${
+                    isOptimizing
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-md'
+                  }`}
+                >
+                  {isOptimizing ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Optimizing...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Optimize with AI
+                    </>
+                  )}
+                </button>
+              </>
             )}
           </div>
           <a
@@ -169,6 +255,18 @@ function ArticleDetail() {
             </svg>
           </a>
         </div>
+
+        {optimizeMessage && (
+          <div className={`mt-4 p-3 rounded-lg text-sm ${
+            optimizeMessage.includes('success') || optimizeMessage.includes('completed')
+              ? 'bg-green-50 text-green-700 border border-green-200'
+              : optimizeMessage.includes('Error') || optimizeMessage.includes('failed')
+              ? 'bg-red-50 text-red-700 border border-red-200'
+              : 'bg-blue-50 text-blue-700 border border-blue-200'
+          }`}>
+            {optimizeMessage}
+          </div>
+        )}
 
         <h1 className="text-4xl font-bold text-gray-900 mb-4">{article.title}</h1>
 

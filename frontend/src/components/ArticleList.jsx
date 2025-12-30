@@ -1,12 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { articlesAPI } from '../services/api';
 
-function ArticleList() {
+function ArticleList({ isScraping }) {
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [filter, setFilter] = useState('all'); // 'all', 'original', 'updated'
+  const [filter, setFilter] = useState('all');
+  const pollingIntervalRef = useRef(null);
+  const lastArticleCountRef = useRef(0);
+  const noChangeCountRef = useRef(0);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 10,
@@ -14,13 +17,13 @@ function ArticleList() {
     pages: 0,
   });
 
-  useEffect(() => {
-    fetchArticles();
-  }, [filter, pagination.page]);
-
-  const fetchArticles = async () => {
+  // Fetch articles function
+  const fetchArticles = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
+      
       const params = {
         page: pagination.page,
         limit: pagination.limit,
@@ -32,20 +35,96 @@ function ArticleList() {
         params.isUpdated = 'true';
       }
 
+      console.log('🔍 Fetching articles...', params);
       const response = await articlesAPI.getAll(params);
       
       if (response.data.success) {
-        setArticles(response.data.data);
+        const newTotal = response.data.pagination.total;
+        const newArticles = response.data.data;
+        
+        console.log(`✓ Got ${newArticles.length} articles, DB total: ${newTotal}`);
+        
+        // ALWAYS update UI
+        setArticles(newArticles);
         setPagination(response.data.pagination);
+        
+        // Track changes during scraping
+        if (silent && isScraping) {
+          if (newTotal === lastArticleCountRef.current) {
+            noChangeCountRef.current += 1;
+            console.log(`⏸️ No change (${noChangeCountRef.current}/30)`);
+            
+            if (noChangeCountRef.current >= 30) {
+              console.log('🛑 Stopping poll - no new articles after 60 seconds');
+              if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+              }
+            }
+          } else {
+            console.log(`🆕 Articles increased: ${lastArticleCountRef.current} → ${newTotal}`);
+            noChangeCountRef.current = 0;
+            lastArticleCountRef.current = newTotal;
+          }
+        }
       }
       setError(null);
     } catch (err) {
-      setError('Failed to fetch articles. Please make sure the backend server is running.');
-      console.error('Error fetching articles:', err);
+      console.error('❌ Fetch error:', err);
+      if (!silent) {
+        setError('Failed to fetch articles. Please make sure the backend server is running.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
+
+  // Initial fetch
+  useEffect(() => {
+    console.log('📄 Initial fetch triggered');
+    fetchArticles();
+  }, [filter, pagination.page]);
+
+  // Polling when scraping
+  useEffect(() => {
+    if (isScraping) {
+      console.log('🚀 SCRAPING STARTED - Setting up polling');
+      
+      // Clear existing interval
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+      
+      // Reset counters
+      noChangeCountRef.current = 0;
+      lastArticleCountRef.current = 0;
+      
+      // Immediate first fetch
+      fetchArticles(true);
+      
+      // Start polling every 2 seconds
+      pollingIntervalRef.current = setInterval(() => {
+        console.log('⏰ Polling...');
+        fetchArticles(true);
+      }, 2000);
+      
+    } else {
+      console.log('🛑 SCRAPING STOPPED - Clearing interval');
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [isScraping]);
 
   const handleFilterChange = (newFilter) => {
     setFilter(newFilter);
@@ -97,6 +176,12 @@ function ArticleList() {
       <div className="mb-8">
         <h2 className="text-4xl font-bold text-gray-900 mb-2">Article Collection</h2>
         <p className="text-gray-600">Browse original articles and AI-optimized versions</p>
+        {isScraping && (
+          <div className="mt-4 flex items-center gap-2 text-blue-600 bg-blue-50 px-4 py-3 rounded-lg">
+            <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-600"></div>
+            <span className="text-sm font-medium">Scraping articles... New articles will appear automatically (Total: {pagination.total})</span>
+          </div>
+        )}
       </div>
 
       {/* Filter Buttons */}
