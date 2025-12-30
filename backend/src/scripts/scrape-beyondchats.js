@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import connectDB from '../config/database.js';
 import Article from '../models/Article.js';
 
@@ -8,8 +9,13 @@ dotenv.config();
 async function scrapeBeyondChatsArticles() {
   console.log('Starting BeyondChats article scraper...');
   
-  // Connect to database
-  await connectDB();
+  // Connect to database only if not already connected (for CLI usage)
+  if (mongoose.connection.readyState === 0) {
+    console.log('Connecting to database...');
+    await connectDB();
+  } else {
+    console.log('Using existing database connection');
+  }
   
   const browser = await puppeteer.launch({
     headless: 'new',

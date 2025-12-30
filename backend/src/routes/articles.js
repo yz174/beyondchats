@@ -30,6 +30,8 @@ router.get('/', async (req, res) => {
     
     const total = await Article.countDocuments(filter);
     
+    console.log(`📊 GET /articles - Filter:`, filter, `Found: ${articles.length} articles, Total: ${total}`);
+    
     res.json({
       success: true,
       data: articles,
@@ -41,6 +43,7 @@ router.get('/', async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('❌ Error fetching articles:', error);
     res.status(500).json({
       success: false,
       message: 'Error fetching articles',
@@ -345,30 +348,63 @@ OPTIMIZED ARTICLE:`;
 // Helper function to search Google
 async function searchGoogleForArticle(query, puppeteer) {
   const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    headless: false,  // Headful mode to see what's happening
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--window-size=1920,1080',
+    ],
+    defaultViewport: null,
   });
 
   try {
     const page = await browser.newPage();
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query + ' blog')}&hl=en`;
     
-    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 2000));
+    console.log(`   Navigating to: ${searchUrl}`);
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await new Promise(r => setTimeout(r, 3000));
+
+    // Check for CAPTCHA
+    const bodyText = await page.evaluate(() => document.body.innerText.toLowerCase());
+    const isBlocked = bodyText.includes('unusual traffic') || 
+                      bodyText.includes('captcha') || 
+                      bodyText.includes('robot');
+
+    if (isBlocked) {
+      console.log('   🔴 GOOGLE BLOCK DETECTED!');
+      console.log('   👉 Please solve the CAPTCHA in the browser window');
+      console.log('   ⏳ Waiting for search results...');
+      await page.waitForSelector('.g, .MjjYud', { timeout: 0 });
+      console.log('   ✅ CAPTCHA solved!');
+      await new Promise(r => setTimeout(r, 2000));
+    }
 
     const results = await page.evaluate(() => {
       const items = [];
-      const elements = document.querySelectorAll('.g, .MjjYud');
+      
+      // Try multiple strategies to find results
+      let elements = document.querySelectorAll('.g, .MjjYud, div[data-sokoban-container]');
+      if (elements.length === 0) {
+        elements = document.querySelectorAll('div:has(> a > h3)');
+      }
+      
+      console.log(`Found ${elements.length} result containers`);
 
       elements.forEach(element => {
-        const titleEl = element.querySelector('h3');
-        const linkEl = element.querySelector('a[href^="http"]');
+        let titleEl = element.querySelector('h3');
+        let linkEl = element.querySelector('a[href^="http"]');
+        
+        if (!linkEl && titleEl) {
+          linkEl = titleEl.closest('a') || titleEl.parentElement.querySelector('a[href^="http"]');
+        }
 
         if (titleEl && linkEl) {
-          const title = titleEl.innerText;
+          const title = titleEl.innerText.trim();
           const url = linkEl.href;
           
-          const banned = ['beyondchats.com', 'google.com', 'youtube.com', 'facebook.com', 'linkedin.com'];
+          const banned = ['beyondchats.com', 'google.com', 'youtube.com', 'facebook.com', 'linkedin.com', 'twitter.com', 'instagram.com'];
 
           if (!banned.some(domain => url.includes(domain)) && title.length > 10) {
             items.push({ title, url });
@@ -378,6 +414,7 @@ async function searchGoogleForArticle(query, puppeteer) {
       return items;
     });
 
+    console.log(`   Found ${results.length} valid results`);
     return results;
   } catch (error) {
     console.error(`Error searching Google: ${error.message}`);
@@ -390,7 +427,7 @@ async function searchGoogleForArticle(query, puppeteer) {
 // Helper function to scrape article content
 async function scrapeArticleContent(url, puppeteer) {
   const browser = await puppeteer.launch({
-    headless: true,
+    headless: 'new',  // Use new headless mode
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
 

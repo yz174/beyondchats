@@ -23,14 +23,15 @@ async function searchGoogle(query) {
 
 // Function to scrape Google using Stealth Puppeteer
 async function scrapeGoogleWithPuppeteer(query) {
-  // Launch visible browser (Headless: false)
+  // Launch browser in headful mode to see what's happening
   const browser = await puppeteer.launch({
-    headless: false,
+    headless: false,  // Headful mode for debugging and CAPTCHA solving
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
       '--disable-infobars',
-      '--window-position=0,0',
+      '--window-size=1920,1080',
       '--ignore-certificate-errors',
     ],
     defaultViewport: null,
@@ -78,19 +79,58 @@ async function scrapeGoogleWithPuppeteer(query) {
       }
     } catch (e) {}
 
-    // Scrape Results
+    // Wait for search results to load
+    console.log('   Waiting for search results...');
+    await new Promise(r => setTimeout(r, 3000));
+    
+    // Debug: Take screenshot to see what page looks like
+    await page.screenshot({ path: 'google-search-debug.png', fullPage: false });
+    console.log('   📸 Screenshot saved to google-search-debug.png');
+
+    // Scrape Results with better selectors
     const results = await page.evaluate(() => {
       const items = [];
-      const validSelectors = ['.g', '.MjjYud', '[data-header-feature]'];
-      const elements = document.querySelectorAll(validSelectors.join(','));
+      
+      // Try multiple selector strategies
+      const strategies = [
+        // Strategy 1: Standard result containers
+        () => document.querySelectorAll('.g, .MjjYud, div[data-sokoban-container]'),
+        // Strategy 2: Look for any div with h3
+        () => document.querySelectorAll('div:has(> a > h3), div:has(> div > a > h3)'),
+        // Strategy 3: Look for search result links
+        () => {
+          const allLinks = Array.from(document.querySelectorAll('a[href^="http"]'));
+          return allLinks.map(a => a.closest('div')).filter(d => d && d.querySelector('h3'));
+        }
+      ];
+      
+      let elements = [];
+      for (const strategy of strategies) {
+        try {
+          elements = Array.from(strategy());
+          if (elements.length > 0) break;
+        } catch (e) {
+          continue;
+        }
+      }
+      
+      console.log(`Found ${elements.length} potential result containers`);
 
       elements.forEach(element => {
-        const titleEl = element.querySelector('h3');
-        const linkEl = element.querySelector('a[href^="http"]');
-        const snippetEl = element.querySelector('.VwiC3b, .IsZvec, .lyLwlc');
+        // Try multiple ways to find title and link
+        let titleEl = element.querySelector('h3');
+        let linkEl = element.querySelector('a[href^="http"]');
+        
+        // Alternative: the link might contain the h3
+        if (!linkEl && titleEl) {
+          linkEl = titleEl.closest('a') || titleEl.parentElement.querySelector('a[href^="http"]');
+        }
+        
+        const snippetEl = element.querySelector('.VwiC3b, .IsZvec, .lyLwlc, [data-content-feature="1"]') || 
+                          element.querySelector('div[style*="line-height"]');
 
         if (titleEl && linkEl) {
-          const title = titleEl.innerText;
+          const title = titleEl.innerText.trim();
           const url = linkEl.href;
           
           const banned = ['beyondchats.com', 'google.com', 'youtube.com', 'facebook.com', 'linkedin.com', 'twitter.com', 'instagram.com', 'reddit.com'];
@@ -99,7 +139,7 @@ async function scrapeGoogleWithPuppeteer(query) {
              items.push({
                title,
                url,
-               snippet: snippetEl ? snippetEl.innerText : ''
+               snippet: snippetEl ? snippetEl.innerText.trim() : ''
              });
           }
         }
@@ -121,7 +161,7 @@ async function scrapeGoogleWithPuppeteer(query) {
 // Function to scrape article content from URL
 async function scrapeArticleContent(url) {
   const browser = await puppeteer.launch({
-    headless: 'new',
+    headless: 'new',  // Keep this headless since we don't need to see article scraping
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
