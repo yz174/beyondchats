@@ -185,7 +185,7 @@ router.delete('/:id', async (req, res) => {
 // POST trigger scraping
 router.post('/scrape', async (req, res) => {
   try {
-    console.log('Scrape endpoint called');
+    console.log('🚀 Scrape endpoint called');
     
     // Import the scraping function
     const { default: scrapeBeyondChatsArticles } = await import('../scripts/scrape-beyondchats.js');
@@ -197,12 +197,22 @@ router.post('/scrape', async (req, res) => {
     });
 
     // Run scraping in background without awaiting
-    scrapeBeyondChatsArticles().catch(error => {
-      console.error('Background scraping error:', error.message);
-    });
+    scrapeBeyondChatsArticles()
+      .then(() => {
+        console.log('✅ Background scraping completed successfully');
+      })
+      .catch(error => {
+        console.error('❌ Background scraping error:', error.message);
+        console.error('Full error details:', error);
+        // Log more specific error information
+        if (error.message.includes('Failed to launch') || error.message.includes('ENOENT')) {
+          console.error('🔧 This appears to be a Chrome executable issue on Railway');
+          console.error('💡 Solution: Ensure Chrome is installed or set PUPPETEER_EXECUTABLE_PATH');
+        }
+      });
 
   } catch (error) {
-    console.error('Scrape endpoint error:', error);
+    console.error('🚨 Scrape endpoint error:', error);
     res.status(500).json({
       success: false,
       message: 'Error starting scraper',

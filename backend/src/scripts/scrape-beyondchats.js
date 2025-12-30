@@ -17,14 +17,49 @@ async function scrapeBeyondChatsArticles() {
     console.log('Using existing database connection');
   }
   
-  // Use default Puppeteer Chrome for local development
+  // Detect Chrome executable path for Railway
+  let executablePath;
+  
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  } else if (process.platform === 'linux') {
+    // Railway and other Linux environments
+    const possiblePaths = [
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/snap/bin/chromium',
+      '/app/.chrome-for-testing/chrome-linux64/chrome' // Railway specific
+    ];
+    
+    const fs = await import('fs');
+    for (const path of possiblePaths) {
+      if (fs.existsSync(path)) {
+        executablePath = path;
+        console.log(`✅ Found Chrome at: ${path}`);
+        break;
+      }
+    }
+  }
+
+  if (!executablePath && process.platform === 'linux') {
+    console.error('❌ No Chrome executable found on Railway! Install Chrome or set PUPPETEER_EXECUTABLE_PATH');
+    throw new Error('Chrome executable not found');
+  }
+  
+  // Launch browser with Railway-compatible settings
   const browser = await puppeteer.launch({
     headless: 'new',
+    executablePath,
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-blink-features=AutomationControlled',
+      '--no-first-run',
+      '--single-process' // Important for Railway's memory limits
     ],
   });
 
