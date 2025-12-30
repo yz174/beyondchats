@@ -46,16 +46,9 @@ function ArticleDetail() {
     setOptimizeMessage('Starting optimization... This may take 2-3 minutes.');
 
     try {
-      const response = await fetch(`http://localhost:5000/api/articles/${id}/optimize`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const response = await articlesAPI.optimize(id);
 
-      const data = await response.json();
-
-      if (data.success) {
+      if (response.data.success) {
         setOptimizeMessage('Optimization in progress! Please wait...');
         
         // Poll for updates every 10 seconds
@@ -79,7 +72,7 @@ function ArticleDetail() {
           }
         }, 300000);
       } else {
-        setOptimizeMessage(data.message || 'Optimization failed');
+        setOptimizeMessage(response.data.message || 'Optimization failed');
         setIsOptimizing(false);
       }
     } catch (error) {

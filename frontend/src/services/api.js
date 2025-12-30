@@ -16,6 +16,9 @@ export const articlesAPI = {
   create: (data) => api.post('/articles', data),
   update: (id, data) => api.put(`/articles/${id}`, data),
   delete: (id) => api.delete(`/articles/${id}`),
+  scrape: () => api.post('/articles/scrape'),
+  deleteAll: () => api.delete('/articles/all'),
+  optimize: (id) => api.post(`/articles/${id}/optimize`),
 };
 
 export default api;
