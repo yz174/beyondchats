@@ -269,31 +269,151 @@ async function optimizeSingleArticle(article, puppeteer, axios) {
   try {
     console.log(`Optimizing article: ${article.title}`);
 
-    // Search Google for similar articles
+    // Search Google using SERP API for similar articles
     const searchResults = await searchGoogleForArticle(article.title, puppeteer);
     
     if (searchResults.length === 0) {
-      console.log('No search results found');
+      console.log('No search results found - Google may have blocked the request or Chrome unavailable');
+      
+      // Instead of failing, optimize with just the original content
+      const prompt = `You are an expert content writer and SEO specialist. Your task is to rewrite and improve the following article for better readability, engagement, and SEO optimization.
+
+ORIGINAL ARTICLE:
+Title: ${article.title}
+Content:
+${article.content}
+
+INSTRUCTIONS:
+1. Rewrite the article to improve readability, structure, and SEO
+2. Use proper headings (##, ###), bullet points, and formatting
+3. Make it more engaging and professional
+4. Ensure the article is between 800-1500 words
+5. Keep the core message and facts from the original article
+6. Do NOT include any preamble - provide ONLY the rewritten article content
+7. Start directly with the article title as an H1 heading (# Title)
+
+OPTIMIZED ARTICLE:`;
+
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          contents: [{
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2000,
+          }
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+      const optimizedContent = response.data.candidates[0].content.parts[0].text.trim();
+
+      // Update article without references
+      article.originalContent = article.content;
+      article.content = optimizedContent + '\n\n---\n\n*This article was optimized using AI for improved readability and SEO.*';
+      article.isUpdated = true;
+      
+      await article.save();
+      console.log(`Article optimized without references: ${article.title}`);
       return;
     }
 
     // Scrape reference articles
     const referenceArticles = [];
+    console.log(`   📰 Attempting to scrape ${Math.min(searchResults.length, 2)} reference articles...`);
+    
     for (const result of searchResults.slice(0, 2)) {
-      const content = await scrapeArticleContent(result.url, puppeteer);
-      if (content && content.length > 100) {
-        referenceArticles.push({
-          title: result.title,
-          url: result.url,
-          content: content,
-        });
+      try {
+        console.log(`   🔄 Scraping: ${result.url}`);
+        const content = await scrapeArticleContent(result.url, puppeteer);
+        if (content && content.length > 100) {
+          referenceArticles.push({
+            title: result.title,
+            url: result.url,
+            content: content,
+          });
+          console.log(`   ✅ Successfully scraped: ${result.title}`);
+        } else {
+          console.log(`   ⚠️ Content too short from: ${result.url}`);
+          // Use SERP snippet as fallback if available
+          if (result.snippet && result.snippet.length > 50) {
+            referenceArticles.push({
+              title: result.title,
+              url: result.url,
+              content: result.snippet + '\n\n[Note: Full content could not be scraped, using search snippet]',
+            });
+            console.log(`   📝 Using SERP snippet for: ${result.title}`);
+          }
+        }
+      } catch (error) {
+        console.log(`   ❌ Failed to scrape ${result.url}: ${error.message}`);
+        // Use SERP snippet as fallback if available
+        if (result.snippet && result.snippet.length > 50) {
+          referenceArticles.push({
+            title: result.title,
+            url: result.url,
+            content: result.snippet + '\n\n[Note: Full content could not be scraped, using search snippet]',
+          });
+          console.log(`   📝 Using SERP snippet for: ${result.title}`);
+        }
       }
     }
 
     if (referenceArticles.length === 0) {
-      console.log('Could not scrape reference articles');
+      console.log('   ⚠️ Could not scrape any reference articles, optimizing with original content only');
+      
+      // Fallback: optimize with just the original content
+      const prompt = `You are an expert content writer and SEO specialist. Your task is to rewrite and improve the following article for better readability, engagement, and SEO optimization.
+
+ORIGINAL ARTICLE:
+Title: ${article.title}
+Content:
+${article.content}
+
+INSTRUCTIONS:
+1. Rewrite the article to improve readability, structure, and SEO
+2. Use proper headings (##, ###), bullet points, and formatting
+3. Make it more engaging and professional
+4. Ensure the article is between 800-1500 words
+5. Keep the core message and facts from the original article
+6. Do NOT include any preamble - provide ONLY the rewritten article content
+7. Start directly with the article title as an H1 heading (# Title)
+
+OPTIMIZED ARTICLE:`;
+
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          contents: [{
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2000,
+          }
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+      const optimizedContent = response.data.candidates[0].content.parts[0].text.trim();
+
+      // Update article without references
+      article.originalContent = article.content;
+      article.content = optimizedContent + '\n\n---\n\n*This article was optimized using AI for improved readability and SEO.*';
+      article.isUpdated = true;
+      
+      await article.save();
+      console.log(`   ✅ Article optimized without references: ${article.title}`);
       return;
     }
+
+    console.log(`   📚 Successfully gathered ${referenceArticles.length} reference articles`);
 
     // Optimize with Gemini
     const prompt = `You are an expert content writer and SEO specialist. Your task is to rewrite and optimize the following article based on the style and formatting of top-ranking articles on Google.
@@ -365,123 +485,201 @@ OPTIMIZED ARTICLE:`;
   }
 }
 
-// Helper function to search Google
+// Helper function to search Google using SERP API
 async function searchGoogleForArticle(query, puppeteer) {
-  const browser = await puppeteer.launch({
-    headless: false,  // Headful mode to see what's happening
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--window-size=1920,1080',
-    ],
-    defaultViewport: null,
-  });
+  const SERP_API_KEY = process.env.SERP_API_KEY;
+  
+  if (!SERP_API_KEY) {
+    console.error('SERP API key not found in environment variables');
+    return [];
+  }
 
   try {
-    const page = await browser.newPage();
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query + ' blog')}&hl=en`;
+    const axios = (await import('axios')).default;
+    const searchQuery = encodeURIComponent(query + ' blog');
+    const serpUrl = `https://serpapi.com/search?q=${searchQuery}&api_key=${SERP_API_KEY}&engine=google&num=10&hl=en`;
     
-    console.log(`   Navigating to: ${searchUrl}`);
-    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await new Promise(r => setTimeout(r, 3000));
-
-    // Check for CAPTCHA
-    const bodyText = await page.evaluate(() => document.body.innerText.toLowerCase());
-    const isBlocked = bodyText.includes('unusual traffic') || 
-                      bodyText.includes('captcha') || 
-                      bodyText.includes('robot');
-
-    if (isBlocked) {
-      console.log('   🔴 GOOGLE BLOCK DETECTED!');
-      console.log('   👉 Please solve the CAPTCHA in the browser window');
-      console.log('   ⏳ Waiting for search results...');
-      await page.waitForSelector('.g, .MjjYud', { timeout: 0 });
-      console.log('   ✅ CAPTCHA solved!');
-      await new Promise(r => setTimeout(r, 2000));
+    console.log(`   🔍 Searching SERP API for: ${query}`);
+    
+    const response = await axios.get(serpUrl);
+    const data = response.data;
+    
+    if (!data.organic_results) {
+      console.log('   ❌ No organic results found');
+      return [];
     }
-
-    const results = await page.evaluate(() => {
-      const items = [];
-      
-      // Try multiple strategies to find results
-      let elements = document.querySelectorAll('.g, .MjjYud, div[data-sokoban-container]');
-      if (elements.length === 0) {
-        elements = document.querySelectorAll('div:has(> a > h3)');
-      }
-      
-      console.log(`Found ${elements.length} result containers`);
-
-      elements.forEach(element => {
-        let titleEl = element.querySelector('h3');
-        let linkEl = element.querySelector('a[href^="http"]');
+    
+    const results = [];
+    const banned = ['beyondchats.com', 'google.com', 'youtube.com', 'facebook.com', 'linkedin.com', 'twitter.com', 'instagram.com'];
+    
+    for (const result of data.organic_results.slice(0, 10)) {
+      if (result.title && result.link && result.title.length > 10) {
+        const url = result.link;
         
-        if (!linkEl && titleEl) {
-          linkEl = titleEl.closest('a') || titleEl.parentElement.querySelector('a[href^="http"]');
+        // Skip banned domains
+        if (!banned.some(domain => url.includes(domain))) {
+          results.push({
+            title: result.title,
+            url: url,
+            snippet: result.snippet || ''
+          });
         }
-
-        if (titleEl && linkEl) {
-          const title = titleEl.innerText.trim();
-          const url = linkEl.href;
-          
-          const banned = ['beyondchats.com', 'google.com', 'youtube.com', 'facebook.com', 'linkedin.com', 'twitter.com', 'instagram.com'];
-
-          if (!banned.some(domain => url.includes(domain)) && title.length > 10) {
-            items.push({ title, url });
-          }
-        }
-      });
-      return items;
-    });
-
-    console.log(`   Found ${results.length} valid results`);
+      }
+    }
+    
+    console.log(`   ✅ Found ${results.length} valid results from SERP API`);
     return results;
+    
   } catch (error) {
-    console.error(`Error searching Google: ${error.message}`);
+    console.error(`Error using SERP API: ${error.message}`);
     return [];
-  } finally {
-    await browser.close();
   }
 }
 
 // Helper function to scrape article content
 async function scrapeArticleContent(url, puppeteer) {
-  const browser = await puppeteer.launch({
-    headless: 'new',  // Use new headless mode
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-
-  try {
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 1000));
-
-    const content = await page.evaluate(() => {
-      const unwanted = document.querySelectorAll('script, style, nav, header, footer, .ad, .advertisement, .sidebar');
-      unwanted.forEach(el => el.remove());
-
-      const contentSelectors = ['article', '[role="main"]', 'main', '.article-content', '.post-content', '.entry-content', '#content'];
-      let contentElement = null;
-      
-      for (const selector of contentSelectors) {
-        contentElement = document.querySelector(selector);
-        if (contentElement) break;
+  // Detect Chrome executable path
+  let executablePath;
+  
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  } else if (process.platform === 'linux') {
+    // Railway and other Linux environments
+    const possiblePaths = [
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/snap/bin/chromium',
+      '/app/.chrome-for-testing/chrome-linux64/chrome' // Railway specific
+    ];
+    
+    const fs = await import('fs');
+    for (const path of possiblePaths) {
+      if (fs.existsSync(path)) {
+        executablePath = path;
+        break;
       }
+    }
+  }
 
-      if (!contentElement) contentElement = document.body;
-
-      const paragraphs = Array.from(contentElement.querySelectorAll('p, h1, h2, h3, h4, h5, h6'));
-      const text = paragraphs.map(p => p.textContent.trim()).filter(t => t.length > 20).join('\n\n');
-
-      return text.slice(0, 5000);
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',  // Use new headless mode
+      executablePath,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-extensions',
+        '--disable-plugins'
+      ],
     });
 
+    const page = await browser.newPage();
+    
+    // Set realistic user agent
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    // Set realistic viewport
+    await page.setViewport({ width: 1366, height: 768 });
+    
+    // Additional stealth measures
+    await page.evaluateOnNewDocument(() => {
+      // Remove webdriver property
+      delete navigator.__proto__.webdriver;
+      
+      // Mock plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+      
+      // Mock languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+      });
+    });
+    
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }); // Increased from 30s to 60s
+    
+    // Random delay to mimic human behavior
+    const randomDelay = Math.floor(Math.random() * 1500) + 1000; // 1-2.5 seconds
+    await new Promise(r => setTimeout(r, randomDelay));
+    
+    // Check if page loaded properly
+    const title = await page.title();
+    if (!title || title.toLowerCase().includes('error') || title.toLowerCase().includes('not found')) {
+      console.log(`   ⚠️ Page might not have loaded properly: ${title}`);
+    }
+
+    const content = await page.evaluate(() => {
+      // Remove unwanted elements
+      const unwanted = document.querySelectorAll('script, style, nav, header, footer, .ad, .advertisement, .sidebar, .comment, .comments, .social-share, .newsletter, .popup');
+      unwanted.forEach(el => el.remove());
+
+      // Try multiple content selectors in order of preference
+      const contentSelectors = [
+        'article',
+        '[role="main"]', 
+        'main', 
+        '.article-content', 
+        '.post-content', 
+        '.entry-content',
+        '.content',
+        '#content',
+        '.post-body',
+        '.article-body',
+        '.story-body'
+      ];
+      
+      let contentElement = null;
+      for (const selector of contentSelectors) {
+        contentElement = document.querySelector(selector);
+        if (contentElement && contentElement.innerText.trim().length > 200) {
+          break;
+        }
+      }
+
+      // Fallback to body if no content found
+      if (!contentElement || contentElement.innerText.trim().length < 200) {
+        contentElement = document.body;
+      }
+
+      // Extract text from paragraphs and headings
+      const textElements = Array.from(contentElement.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li'));
+      const text = textElements
+        .map(p => p.textContent.trim())
+        .filter(t => t.length > 15 && !t.match(/^(cookie|privacy|terms|subscribe|follow)/i))
+        .join('\n\n');
+
+      return text.slice(0, 8000); // Increased from 5000 to 8000
+    });
+
+    // Validate content quality
+    if (content.length < 100) {
+      console.log(`   ⚠️ Scraped content too short (${content.length} chars) from: ${url}`);
+      return '';
+    }
+    
+    console.log(`   📄 Scraped ${content.length} characters from: ${url}`);
     return content;
   } catch (error) {
+    if (error.message.includes('Failed to launch') || error.message.includes('ENOENT')) {
+      console.error(`Failed to launch browser for scraping ${url}: ${error.message}`);
+      return '';
+    }
     console.error(`Error scraping ${url}: ${error.message}`);
     return '';
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
