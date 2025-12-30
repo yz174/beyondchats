@@ -20,8 +20,12 @@ async function scrapeBeyondChatsArticles() {
   // Detect Chrome executable path for Railway
   let executablePath;
   
+  console.log(`🔍 Platform detected: ${process.platform}`);
+  console.log(`🔍 PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH || 'not set'}`);
+  
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    console.log(`🎯 Using env variable path: ${executablePath}`);
   } else if (process.platform === 'linux') {
     // Railway and other Linux environments
     const possiblePaths = [
@@ -33,62 +37,114 @@ async function scrapeBeyondChatsArticles() {
       '/app/.chrome-for-testing/chrome-linux64/chrome' // Railway specific
     ];
     
+    console.log(`🔍 Searching for Chrome in ${possiblePaths.length} possible locations...`);
     const fs = await import('fs');
     for (const path of possiblePaths) {
+      console.log(`  Checking: ${path}`);
       if (fs.existsSync(path)) {
         executablePath = path;
         console.log(`✅ Found Chrome at: ${path}`);
         break;
+      } else {
+        console.log(`  ❌ Not found: ${path}`);
       }
     }
+  } else {
+    console.log(`🖥️ Non-Linux platform, using default Puppeteer Chrome`);
   }
 
   if (!executablePath && process.platform === 'linux') {
-    console.error('❌ No Chrome executable found on Railway! Install Chrome or set PUPPETEER_EXECUTABLE_PATH');
-    throw new Error('Chrome executable not found');
+    console.error('❌ No Chrome executable found on Railway!');
+    console.log('🔄 Attempting to use default Puppeteer Chrome...');
+    // Don't throw error, let Puppeteer try to find Chrome
+    executablePath = undefined; 
   }
   
-  // Launch browser with Railway-compatible settings
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    executablePath,
-    args: [
-      '--no-sandbox', 
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-blink-features=AutomationControlled',
-      '--no-first-run',
-      '--single-process' // Important for Railway's memory limits
-    ],
-  });
+  // Launch browser with simplified settings
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      executablePath,
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+        // Removed potentially problematic args for local development
+      ],
+    });
+    console.log('✅ Browser launched successfully');
+  } catch (launchError) {
+    console.error('❌ Failed to launch browser:', launchError.message);
+    console.error('💡 This suggests Chrome is not available or there are launch issues');
+    throw launchError;
+  }
 
   try {
-    const page = await browser.newPage();
+    // Wait a moment after browser launch
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
-    // Set viewport and user agent
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    console.log('🔄 Creating new page...');
+    let page = await browser.newPage();
     
-    // Wait for page to be ready
-    await page.evaluateOnNewDocument(() => {
-      // This runs before any page script
-    });
+    // Ensure page is ready before any operations
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
-    console.log('Navigating to BeyondChats blogs page...');
+    console.log('🔧 Setting up page configuration...');
+    
+    // Set viewport and user agent with error handling
+    try {
+      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    } catch (setupError) {
+      console.error('❌ Error setting up page:', setupError.message);
+      throw setupError;
+    }
+    
+    console.log('✅ Page configuration complete');
+    
+    // Wait before navigation
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    console.log('🌐 Starting navigation to BeyondChats...');
+    
     try {
       await page.goto('https://beyondchats.com/blogs/', {
-        waitUntil: 'networkidle0',
-        timeout: 30000,
+        waitUntil: 'domcontentloaded', // Use less strict waiting
+        timeout: 60000, // Increase timeout
       });
+      console.log('✅ Navigation successful');
     } catch (navigationError) {
-      console.log('First navigation attempt failed, retrying...');
-      // Wait a bit before retrying
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await page.goto('https://beyondchats.com/blogs/', {
-        waitUntil: 'domcontentloaded',
-        timeout: 20000,
-      });
+      console.log('⚠️ Navigation failed:', navigationError.message);
+      
+      // If it's a frame detachment issue, try creating a new page
+      if (navigationError.message.includes('detached') || navigationError.message.includes('main frame')) {
+        console.log('🔄 Frame detached, creating fresh page...');
+        
+        try {
+          await page.close();
+        } catch (closeError) {
+          // Ignore close errors
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        page = await browser.newPage();
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        await page.goto('https://beyondchats.com/blogs/', {
+          waitUntil: 'domcontentloaded',
+          timeout: 60000,
+        });
+        
+        console.log('✅ Fresh page navigation successful');
+      } else {
+        throw navigationError;
+      }
     }
 
     // Wait for content to load
