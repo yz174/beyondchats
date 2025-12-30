@@ -554,14 +554,15 @@ async function scrapeArticleContent(url, puppeteer) {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-blink-features=AutomationControlled',
-        '--no-first-run',
-        '--single-process'
+        '--disable-gpu'
       ],
     });
 
     const page = await browser.newPage();
+    
+    // Set longer timeouts
+    page.setDefaultNavigationTimeout(45000);
+    page.setDefaultTimeout(45000);
     
     // Set realistic user agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -569,33 +570,33 @@ async function scrapeArticleContent(url, puppeteer) {
     // Set realistic viewport
     await page.setViewport({ width: 1366, height: 768 });
     
-    // Additional stealth measures
-    await page.evaluateOnNewDocument(() => {
-      // Remove webdriver property
-      delete navigator.__proto__.webdriver;
-      
-      // Mock plugins
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
-      });
-      
-      // Mock languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en'],
-      });
-    });
+    // Navigate with retry logic
+    let navigationSuccess = false;
+    const maxRetries = 2;
     
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }); // Increased from 30s to 60s
-    
-    // Random delay to mimic human behavior
-    const randomDelay = Math.floor(Math.random() * 1500) + 1000; // 1-2.5 seconds
-    await new Promise(r => setTimeout(r, randomDelay));
-    
-    // Check if page loaded properly
-    const title = await page.title();
-    if (!title || title.toLowerCase().includes('error') || title.toLowerCase().includes('not found')) {
-      console.log(`   ⚠️ Page might not have loaded properly: ${title}`);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await page.goto(url, { 
+          waitUntil: 'domcontentloaded',
+          timeout: 45000 
+        });
+        navigationSuccess = true;
+        break;
+      } catch (navError) {
+        if (attempt === maxRetries) {
+          throw new Error(`Navigation failed after ${maxRetries} attempts: ${navError.message}`);
+        }
+        console.log(`   ⚠️ Navigation attempt ${attempt} failed, retrying...`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
     }
+    
+    if (!navigationSuccess) {
+      throw new Error('Failed to navigate to page');
+    }
+    
+    // Wait for content
+    await new Promise(r => setTimeout(r, 2000));
 
     const content = await page.evaluate(() => {
       // Remove unwanted elements
