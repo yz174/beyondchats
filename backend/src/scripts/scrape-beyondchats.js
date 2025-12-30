@@ -358,12 +358,16 @@ async function scrapeBeyondChatsArticles() {
     throw error;
   } finally {
     await browser.close();
-    process.exit(0);
   }
 }
 
-// Run the scraper
-scrapeBeyondChatsArticles().catch((error) => {
-  console.error('Fatal error:', error);
-  process.exit(1);
-});
+// Export the function
+export default scrapeBeyondChatsArticles;
+
+// Only run if this file is executed directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  scrapeBeyondChatsArticles().catch((error) => {
+    console.error('Fatal error:', error);
+    process.exit(1);
+  });
+}
