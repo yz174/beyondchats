@@ -548,20 +548,48 @@ async function searchGoogleForArticle(query, puppeteer) {
 
 // Helper function to scrape article content
 async function scrapeArticleContent(url, puppeteer) {
-  // Detect Chrome executable path
+  // Detect Chrome executable path and configure for environment
   let executablePath;
+  let launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--single-process',
+    '--no-zygote'
+  ];
   
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-  } else if (process.platform === 'linux') {
-    // Railway and other Linux environments
+  // Check if we're on Railway/Linux (production)
+  if (process.platform === 'linux') {
+    try {
+      // Use @sparticuz/chromium for serverless/cloud environments
+      const chromium = await import('@sparticuz/chromium');
+      executablePath = await chromium.default.executablePath();
+      launchArgs = chromium.default.args;
+    } catch (chromiumError) {
+      console.log('Could not load @sparticuz/chromium, trying system Chrome');
+      // Fallback: try to find system Chrome
+      const possiblePaths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+      ];
+      
+      const fs = await import('fs');
+      for (const path of possiblePaths) {
+        if (fs.existsSync(path)) {
+          executablePath = path;
+          break;
+        }
+      }
+    }
+  } else {
+    // Local development - find Chrome
     const possiblePaths = [
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-      '/snap/bin/chromium',
-      '/app/.chrome-for-testing/chrome-linux64/chrome' // Railway specific
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     ];
     
     const fs = await import('fs');
@@ -575,21 +603,13 @@ async function scrapeArticleContent(url, puppeteer) {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: 'new',  // Use new headless mode
+    // Import puppeteer-core for direct execution
+    const puppeteerCore = await import('puppeteer-core');
+    
+    browser = await puppeteerCore.default.launch({
+      headless: 'new',
       executablePath,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-extensions',
-        '--disable-plugins'
-      ],
+      args: launchArgs,
     });
 
     const page = await browser.newPage();

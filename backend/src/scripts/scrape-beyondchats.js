@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import connectDB from '../config/database.js';
@@ -17,135 +17,112 @@ async function scrapeBeyondChatsArticles() {
     console.log('Using existing database connection');
   }
   
-  // Detect Chrome executable path for Railway
+  // Detect Chrome executable path
   let executablePath;
+  let launchArgs = [
+    '--no-sandbox', 
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--single-process',
+    '--no-zygote'
+  ];
   
   console.log(`🔍 Platform detected: ${process.platform}`);
-  console.log(`🔍 PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH || 'not set'}`);
+  console.log(`🔍 NODE_ENV: ${process.env.NODE_ENV}`);
   
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    console.log(`🎯 Using env variable path: ${executablePath}`);
-  } else if (process.platform === 'linux') {
-    // Railway and other Linux environments
-    const possiblePaths = [
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-      '/snap/bin/chromium',
-      '/app/.chrome-for-testing/chrome-linux64/chrome' // Railway specific
-    ];
+  // Check if we're on Railway/Linux (production)
+  if (process.platform === 'linux') {
+    console.log('🚂 Running on Linux (likely Railway)');
     
-    console.log(`🔍 Searching for Chrome in ${possiblePaths.length} possible locations...`);
-    const fs = await import('fs');
-    for (const path of possiblePaths) {
-      console.log(`  Checking: ${path}`);
-      if (fs.existsSync(path)) {
-        executablePath = path;
-        console.log(`✅ Found Chrome at: ${path}`);
-        break;
-      } else {
-        console.log(`  ❌ Not found: ${path}`);
+    try {
+      // Use @sparticuz/chromium for serverless/cloud environments
+      const chromium = await import('@sparticuz/chromium');
+      executablePath = await chromium.default.executablePath();
+      launchArgs = chromium.default.args;
+      console.log(`✅ Using @sparticuz/chromium: ${executablePath}`);
+    } catch (chromiumError) {
+      console.error('❌ Failed to load @sparticuz/chromium:', chromiumError.message);
+      
+      // Fallback: try to find system Chrome
+      const possiblePaths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+      ];
+      
+      const fs = await import('fs');
+      for (const path of possiblePaths) {
+        if (fs.existsSync(path)) {
+          executablePath = path;
+          console.log(`✅ Found system Chrome at: ${path}`);
+          break;
+        }
+      }
+      
+      if (!executablePath) {
+        throw new Error('No Chrome executable found on Railway!');
       }
     }
   } else {
-    console.log(`🖥️ Non-Linux platform, using default Puppeteer Chrome`);
-  }
-
-  if (!executablePath && process.platform === 'linux') {
-    console.error('❌ No Chrome executable found on Railway!');
-    console.log('🔄 Attempting to use default Puppeteer Chrome...');
-    // Don't throw error, let Puppeteer try to find Chrome
-    executablePath = undefined; 
+    // Local development - use local Chrome
+    console.log('🖥️ Running locally');
+    
+    // Try to find local Chrome installation
+    const possiblePaths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/usr/bin/google-chrome',
+    ];
+    
+    const fs = await import('fs');
+    for (const path of possiblePaths) {
+      if (fs.existsSync(path)) {
+        executablePath = path;
+        console.log(`✅ Found local Chrome at: ${path}`);
+        break;
+      }
+    }
+    
+    if (!executablePath) {
+      console.error('❌ No local Chrome found!');
+      throw new Error('Please install Google Chrome for local development');
+    }
   }
   
-  // Launch browser with simplified settings
+  // Launch browser
   let browser;
   try {
+    console.log('🚀 Launching browser...');
     browser = await puppeteer.launch({
       headless: 'new',
       executablePath,
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu'
-        // Removed potentially problematic args for local development
-      ],
+      args: launchArgs,
     });
     console.log('✅ Browser launched successfully');
   } catch (launchError) {
     console.error('❌ Failed to launch browser:', launchError.message);
-    console.error('💡 This suggests Chrome is not available or there are launch issues');
     throw launchError;
   }
 
   try {
-    // Wait a moment after browser launch
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
     console.log('🔄 Creating new page...');
-    let page = await browser.newPage();
+    const page = await browser.newPage();
     
-    // Ensure page is ready before any operations
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    console.log('🔧 Setting up page configuration...');
-    
-    // Set viewport and user agent with error handling
-    try {
-      await page.setViewport({ width: 1920, height: 1080 });
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    } catch (setupError) {
-      console.error('❌ Error setting up page:', setupError.message);
-      throw setupError;
-    }
-    
+    // Set viewport and user agent
+    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     console.log('✅ Page configuration complete');
     
-    // Wait before navigation
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('🌐 Navigating to BeyondChats blogs page...');
     
-    console.log('🌐 Starting navigation to BeyondChats...');
-    
-    try {
-      await page.goto('https://beyondchats.com/blogs/', {
-        waitUntil: 'domcontentloaded', // Use less strict waiting
-        timeout: 60000, // Increase timeout
-      });
-      console.log('✅ Navigation successful');
-    } catch (navigationError) {
-      console.log('⚠️ Navigation failed:', navigationError.message);
-      
-      // If it's a frame detachment issue, try creating a new page
-      if (navigationError.message.includes('detached') || navigationError.message.includes('main frame')) {
-        console.log('🔄 Frame detached, creating fresh page...');
-        
-        try {
-          await page.close();
-        } catch (closeError) {
-          // Ignore close errors
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        page = await browser.newPage();
-        await page.setViewport({ width: 1920, height: 1080 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        await page.goto('https://beyondchats.com/blogs/', {
-          waitUntil: 'domcontentloaded',
-          timeout: 60000,
-        });
-        
-        console.log('✅ Fresh page navigation successful');
-      } else {
-        throw navigationError;
-      }
-    }
+    await page.goto('https://beyondchats.com/blogs/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
+    console.log('✅ Navigation successful');
 
     // Wait for content to load
     await new Promise(resolve => setTimeout(resolve, 3000));
