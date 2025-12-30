@@ -14,5 +14,9 @@ nixPkgs = [
     "alsa-lib",
     "pango",
     "cairo",
-    "glib"
+    "glib",
+    "gtk3"
 ]
+
+[start]
+cmd = "LD_LIBRARY_PATH=/nix/store/*-nss-*/lib:/nix/store/*-atk-*/lib:/nix/store/*-glib-*/lib:$LD_LIBRARY_PATH node src/server.js"
