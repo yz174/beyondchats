@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer-core';
+import puppeteer from 'puppeteer';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import connectDB from '../config/database.js';
@@ -17,89 +17,23 @@ async function scrapeBeyondChatsArticles() {
     console.log('Using existing database connection');
   }
   
-  // Detect Chrome executable path
-  let executablePath;
-  let launchArgs = [
-    '--no-sandbox', 
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--single-process',
-    '--no-zygote'
-  ];
+  console.log(`🔍 Platform: ${process.platform}, Environment: ${process.env.NODE_ENV || 'development'}`);
   
-  console.log(`🔍 Platform detected: ${process.platform}`);
-  console.log(`🔍 NODE_ENV: ${process.env.NODE_ENV}`);
-  
-  // Check if we're on Railway/Linux (production)
-  if (process.platform === 'linux') {
-    console.log('🚂 Running on Linux (likely Railway)');
-    
-    try {
-      // Use @sparticuz/chromium for serverless/cloud environments
-      const chromium = await import('@sparticuz/chromium');
-      executablePath = await chromium.default.executablePath();
-      launchArgs = chromium.default.args;
-      console.log(`✅ Using @sparticuz/chromium: ${executablePath}`);
-    } catch (chromiumError) {
-      console.error('❌ Failed to load @sparticuz/chromium:', chromiumError.message);
-      
-      // Fallback: try to find system Chrome
-      const possiblePaths = [
-        '/usr/bin/google-chrome',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-      ];
-      
-      const fs = await import('fs');
-      for (const path of possiblePaths) {
-        if (fs.existsSync(path)) {
-          executablePath = path;
-          console.log(`✅ Found system Chrome at: ${path}`);
-          break;
-        }
-      }
-      
-      if (!executablePath) {
-        throw new Error('No Chrome executable found on Railway!');
-      }
-    }
-  } else {
-    // Local development - use local Chrome
-    console.log('🖥️ Running locally');
-    
-    // Try to find local Chrome installation
-    const possiblePaths = [
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/usr/bin/google-chrome',
-    ];
-    
-    const fs = await import('fs');
-    for (const path of possiblePaths) {
-      if (fs.existsSync(path)) {
-        executablePath = path;
-        console.log(`✅ Found local Chrome at: ${path}`);
-        break;
-      }
-    }
-    
-    if (!executablePath) {
-      console.error('❌ No local Chrome found!');
-      throw new Error('Please install Google Chrome for local development');
-    }
-  }
-  
-  // Launch browser
+  // Launch browser using Puppeteer's bundled Chrome
   let browser;
   try {
-    console.log('🚀 Launching browser...');
+    console.log('🚀 Launching browser with bundled Chrome...');
     browser = await puppeteer.launch({
       headless: 'new',
-      executablePath,
-      args: launchArgs,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-blink-features=AutomationControlled',
+        '--no-first-run',
+        '--single-process'
+      ],
     });
     console.log('✅ Browser launched successfully');
   } catch (launchError) {
